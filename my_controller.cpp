@@ -1,6 +1,7 @@
 #include <webots/Robot.hpp>
 #include <webots/Motor.hpp>
 #include <webots/Keyboard.hpp>
+#include <webots/InertialUnit.hpp>
 #include <iostream>
 #include <fstream>
 #include <cmath>
@@ -18,10 +19,19 @@ namespace Config {
     constexpr int MOTOR_COUNT = 18;
     constexpr double LIMIT = 1.56;
 
-    // Koşu Parametreleri
-    constexpr double STEP_LENGTH = 0.050;  
-    constexpr double STEP_HEIGHT = 0.025; // Adımın havada 2.5 cm yükselmesini sağladık (sürtünmeyi önlemek için)
-    constexpr double WALK_SPEED  = 4.5;   
+    // ==========================================
+    // DEĞİŞTİREBİLECEĞİNİZ YÜRÜYÜŞ PARAMETRELERİ:
+    // ==========================================
+    
+    // 1. ADIM UZUNLUĞU (Metre cinsinden - Bacakların birbirine çarpmaması için 4.5 cm idealdir)
+    constexpr double STEP_LENGTH = 0.045;  
+
+    // 2. ADIM SIKLIĞI / HIZI (Bu değeri artırarak adımları hızlandırıp yavaşlatabilirsiniz. Örn: 3.0 ile 6.0 arası)
+    constexpr double WALK_SPEED = 10.0;   
+
+    // 3. ADIM YÜKSEKLİĞİ (Yerden kalkış yüksekliği - 2.5 cm)
+    constexpr double STEP_HEIGHT = 0.025;  
+    
     constexpr double SWING_PHASE_RATIO = 0.5; // Adımın %50'si havada (atılım), %50'si yerde (itiş)
 
     // Standart Duruş Koordinatları
@@ -72,6 +82,11 @@ int main(int argc, char **argv) {
     webots::Keyboard keyboard;
     keyboard.enable(timeStep);
 
+    webots::InertialUnit *imu = robot->getInertialUnit("terazi");
+    if (imu) {
+        imu->enable(timeStep);
+    }
+
     std::vector<webots::Motor*> motors(Config::MOTOR_COUNT);
     for (int i = 0; i < Config::MOTOR_COUNT; i++) {
         motors[i] = robot->getMotor("joint_" + std::to_string(i + 1));
@@ -95,17 +110,74 @@ int main(int argc, char **argv) {
 
     double t = 0.0;
     bool isWalking = false;
-    int prevKey = -1;
+
+    // Uzaktan kumanda / klavye durum değişkenleri
+    double vy_current = 0.0;
+    double omega_current = 0.0;
+    double walk_scale = 0.0;
+    double target_yaw = 0.0;
+    bool wasWalking = false;
 
     while (robot->step(timeStep) != -1) {
         int key = keyboard.getKey();
-        if (key == ' ' && prevKey != ' ') {
-            isWalking = !isWalking;
-            std::cout << (isWalking ? ">> KOSU BASLADI" : ">> DURDU") << std::endl;
-        }
-        prevKey = key;
 
-        if (isWalking) t += (timeStep / 1000.0) * Config::WALK_SPEED;
+        // Klavye komutlarını oku
+        double vy_target = 0.0;
+        double omega_target = 0.0;
+        bool hasInput = false;
+
+        if (key == webots::Keyboard::UP || key == 'W') {
+            vy_target = 1.0;
+            hasInput = true;
+        } else if (key == webots::Keyboard::DOWN || key == 'S') {
+            vy_target = -1.0;
+            hasInput = true;
+        } else if (key == webots::Keyboard::LEFT || key == 'A') {
+            omega_target = 1.0; // Sola dön
+            hasInput = true;
+        } else if (key == webots::Keyboard::RIGHT || key == 'D') {
+            omega_target = -1.0; // Sağa dön
+            hasInput = true;
+        }
+
+        // Hızları ve duruşu sarsıntısız geçiş için yumuşakça yumuşat (low-pass filter)
+        double accel_rate = 0.15;
+        vy_current += (vy_target - vy_current) * accel_rate;
+        omega_current += (omega_target - omega_current) * accel_rate;
+
+        if (hasInput) {
+            walk_scale = std::min(walk_scale + accel_rate, 1.0);
+        } else {
+            walk_scale = std::max(walk_scale - accel_rate, 0.0);
+        }
+
+        isWalking = (walk_scale > 0.01);
+        if (isWalking) {
+            t += (timeStep / 1000.0) * Config::WALK_SPEED;
+        }
+
+        // IMU yardımıyla aktif yön koruma / düzeltme kontrolü
+        double yaw_current = 0.0;
+        if (imu) {
+            const double *rpy = imu->getRollPitchYaw();
+            yaw_current = rpy[2]; // Webots Yaw açısı
+        }
+
+        // Manuel dönüş yapıyorsak veya duruyorsak hedef açıyı sürekli güncelle (IMU ile çakışmasın)
+        if (omega_target != 0.0 || !isWalking) {
+            target_yaw = yaw_current;
+            wasWalking = isWalking;
+        } else if (isWalking && !wasWalking) {
+            target_yaw = yaw_current;
+            wasWalking = true;
+        }
+
+        double yaw_error = target_yaw - yaw_current;
+        while (yaw_error > M_PI) yaw_error -= 2.0 * M_PI;
+        while (yaw_error < -M_PI) yaw_error += 2.0 * M_PI;
+
+        double Kp = 0.15; // Sapma düzeltme katsayısı
+        double steer_correction = (omega_target == 0.0) ? (Kp * yaw_error) : 0.0;
 
         for (int leg = 0; leg < 6; leg++) {
             bool isGroup1 = (leg == 0 || leg == 4 || leg == 2);
@@ -117,21 +189,32 @@ int main(int argc, char **argv) {
 
             double dY = 0.0, dZ = 0.0;
             if (isWalking) {
+                double side_sign = (leg < 3) ? 1.0 : -1.0; // Sağ taraf +1, Sol taraf -1
+                // Dönüş için bacaklara diferansiyel hız uygula
+                double leg_vy = vy_current + side_sign * omega_current;
+
                 if (phase_norm < Config::SWING_PHASE_RATIO) {
                     // SWING (Havada atılım)
                     double swing_p = phase_norm / Config::SWING_PHASE_RATIO;
-                    dY = -Config::STEP_LENGTH * std::cos(swing_p * M_PI); 
-                    dZ = Config::STEP_HEIGHT * std::sin(swing_p * M_PI);  
+                    dY = -Config::STEP_LENGTH * std::cos(swing_p * M_PI) * leg_vy; 
+                    double sin_p = std::sin(swing_p * M_PI);
+                    dZ = Config::STEP_HEIGHT * sin_p * sin_p;  
                 } else {
                     // STANCE (Yerde itiş)
                     double stance_p = (phase_norm - Config::SWING_PHASE_RATIO) / (1.0 - Config::SWING_PHASE_RATIO);
-                    dY = Config::STEP_LENGTH * std::cos(stance_p * M_PI); 
+                    dY = Config::STEP_LENGTH * std::cos(stance_p * M_PI) * leg_vy; 
                     dZ = 0.0; 
                 }
+
+                // Kalkış ve duruşları sarsıntısızlaştırmak için ölçeklendir
+                dY *= walk_scale;
+                dZ *= walk_scale;
             }
 
             double target_X = Config::STANCE_X;
-            double target_Y = Config::STANCE_Y + dY;
+            double side_sign = (leg < 3) ? 1.0 : -1.0;
+            // Düz giderken sapma düzeltmesi (steer_correction) ekle
+            double target_Y = Config::STANCE_Y + dY + side_sign * steer_correction;
             double target_Z = Config::STANCE_Z + dZ;
 
             double yaw = Config::FEMUR_YAW[leg];
