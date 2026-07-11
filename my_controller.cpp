@@ -19,9 +19,9 @@ namespace Config {
     constexpr double LIMIT = 1.56;
 
     // Koşu Parametreleri
-    constexpr double STEP_LENGTH = 0.035;  
+    constexpr double STEP_LENGTH = 0.050;  
     constexpr double STEP_HEIGHT = 0.025; // Adımın havada 2.5 cm yükselmesini sağladık (sürtünmeyi önlemek için)
-    constexpr double WALK_SPEED  = 3.0;   
+    constexpr double WALK_SPEED  = 4.5;   
     constexpr double SWING_PHASE_RATIO = 0.5; // Adımın %50'si havada (atılım), %50'si yerde (itiş)
 
     // Standart Duruş Koordinatları
