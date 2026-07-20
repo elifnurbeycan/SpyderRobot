@@ -52,10 +52,10 @@ namespace Config {
     // DEĞİŞTİREBİLECEĞİNİZ YÜRÜYÜŞ PARAMETRELERİ:
     // ==========================================
     
-    // 1. ADIM UZUNLUĞU (Metre cinsinden - Çarpışmaları önlemek için 3.5 cm ile 4.0 cm arası idealdir)
+    // 1. ADIM UZUNLUĞU (Metre cinsinden)
     constexpr double STEP_LENGTH = 0.045;  
 
-    // 2. ADIM SIKLIĞI / HIZI (Simülatörde 10.0'a kadar çıkabilirsiniz. Gerçek robot için 3.5 - 5.0 önerilir)
+    // 2. ADIM SIKLIĞI / HIZI (Simülatör hızı)
     constexpr double WALK_SPEED = 10.0;   
 
     // 3. ADIM YÜKSEKLİĞİ (Yerden kalkış yüksekliği - 2.5 cm)
