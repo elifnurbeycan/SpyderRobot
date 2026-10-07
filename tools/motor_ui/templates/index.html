@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>ST3020 Motor Kontrol</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#080b10;--card:rgba(255,255,255,.04);--border:rgba(255,255,255,.09);
+  --accent:#00d4ff;--glow:rgba(0,212,255,.18);
+  --red:#ff4560;--green:#00e676;--text:#e2e8f0;--muted:#64748b;
+}
+body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;padding:24px;min-height:100vh}
+
+/* Header */
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:28px;padding-bottom:18px;border-bottom:1px solid var(--border)}
+h1{font-size:20px;font-weight:700}h1 span{color:var(--accent)}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.badge{display:flex;align-items:center;gap:8px;padding:7px 14px;border:1px solid var(--border);border-radius:20px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);transition:.3s}
+.dot.on{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.5}}
+
+/* Top controls */
+.top-bar{display:flex;gap:10px;margin-bottom:22px}
+.tb-btn{padding:7px 16px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--muted);font-family:inherit;font-size:13px;cursor:pointer;transition:.2s}
+.tb-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Grid */
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-bottom:28px}
+@media(max-width:900px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:580px){.grid{grid-template-columns:1fr}}
+
+/* Card */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px;transition:border-color .3s}
+.card.torque-on{border-color:rgba(0,212,255,.25)}
+
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:14px}
+.motor-name{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.motor-id{font-size:18px;font-weight:700}
+
+/* Torque switch */
+.sw{display:flex;align-items:center;gap:6px}
+.sw-label{font-size:11px;color:var(--muted)}
+.sw input{display:none}
+.sw-track{width:34px;height:18px;background:rgba(255,255,255,.1);border-radius:9px;cursor:pointer;position:relative;transition:.3s}
+.sw-track::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:.3s}
+input:checked~.sw-track{background:rgba(0,212,255,.25)}
+input:checked~.sw-track::after{transform:translateX(16px);background:var(--accent);box-shadow:0 0 6px var(--accent)}
+
+/* Position */
+.pos-num{font-family:'JetBrains Mono',monospace;font-size:42px;font-weight:500;color:var(--accent);text-align:center;line-height:1}
+.pos-deg{font-size:11px;color:var(--muted);text-align:center;margin-top:4px;margin-bottom:14px}
+
+/* Track */
+.track-wrap{position:relative;margin-bottom:22px}
+.track{position:relative;height:7px;background:rgba(255,255,255,.07);border-radius:4px;margin:6px 0 18px}
+.track-fill{height:100%;background:linear-gradient(90deg,rgba(0,212,255,.25),var(--accent));border-radius:4px;transition:width .2s}
+.track-cursor{position:absolute;top:50%;width:13px;height:13px;background:var(--accent);border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 10px var(--accent);transition:left .2s;pointer-events:none}
+.marker{position:absolute;top:-4px;width:2px;height:15px;border-radius:1px;transform:translateX(-50%)}
+.marker.min-m{background:var(--red)}
+.marker.max-m{background:var(--green)}
+.marker::after{position:absolute;top:17px;left:50%;transform:translateX(-50%);font-size:9px;font-family:'JetBrains Mono',monospace;white-space:nowrap}
+.marker.min-m::after{content:attr(data-v);color:var(--red)}
+.marker.max-m::after{content:attr(data-v);color:var(--green)}
+.track-ends{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+
+/* Step buttons */
+.steps{display:flex;gap:5px;margin-bottom:10px}
+.step{flex:1;padding:7px 3px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;text-align:center;transition:.15s;user-select:none}
+.step:hover{background:rgba(255,255,255,.06);color:var(--text)}
+.step:active{transform:scale(.94)}
+.step.neg:hover{border-color:rgba(255,69,96,.35);color:#ff7080}
+.step.pos:hover{border-color:rgba(0,212,255,.35);color:var(--accent)}
+.mid-sep{width:1px;background:var(--border);margin:0 2px}
+
+/* Action buttons */
+.actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+.act{padding:7px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:inherit;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;cursor:pointer;transition:.2s}
+.act:hover{background:rgba(255,255,255,.05);color:var(--text)}
+.act.min-btn{border-color:rgba(255,69,96,.3);color:#ff6070}
+.act.min-btn:hover{background:rgba(255,69,96,.1);border-color:var(--red);color:var(--red)}
+.act.max-btn{border-color:rgba(0,230,118,.3);color:#00cc66}
+.act.max-btn:hover{background:rgba(0,230,118,.1);border-color:var(--green);color:var(--green)}
+
+/* Limit bar */
+.limit-bar{display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:11px}
+.lmin{color:var(--red)}.lrng{color:var(--muted)}.lmax{color:var(--green)}
+
+/* Summary */
+.summary{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px}
+.sec-title{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse}
+th{padding:7px 10px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:left}
+td{padding:9px 10px;font-size:13px;border-bottom:1px solid rgba(255,255,255,.03);font-family:'JetBrains Mono',monospace}
+tr:last-child td{border-bottom:none}
+.c-id{color:var(--accent);font-weight:600}.c-min{color:var(--red)}.c-max{color:var(--green)}.c-n{color:var(--muted)}
+.copy-btn{margin-top:14px;padding:8px 18px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--muted);font-family:inherit;font-size:12px;cursor:pointer;transition:.2s}
+.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>ST3020 <span>Motor Kontrol</span></h1>
+    <div class="sub">Hexapod · Femur Motorları · ID: 2, 5, 8, 11, 14, 17</div>
+  </div>
+  <div class="badge"><div class="dot" id="dot"></div><span id="statusTxt">Bağlanıyor…</span></div>
+</header>
+
+<div class="top-bar">
+  <button class="tb-btn" onclick="allCenter()">↑ Tümünü Merkeze</button>
+  <button class="tb-btn" onclick="allTorqueOn()">⚡ Tork Hepsine Aç</button>
+  <button class="tb-btn" onclick="allTorqueOff()">○ Tork Hepsine Kapat</button>
+  <button class="tb-btn" onclick="clearAllLimits()">✕ Limitleri Sıfırla</button>
+  <button class="tb-btn" style="border-color:rgba(255,165,0,.4);color:#ffa500" onclick="unlockEepromAll()">🔓 EEPROM Limitlerini Kaldır (0–4095)</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="summary">
+  <div class="sec-title">Limit Özeti</div>
+  <table>
+    <thead><tr><th>Motor</th><th>ID</th><th>Mevcut</th><th>MIN</th><th>MAX</th><th>Aralık</th><th>Derece</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <button class="copy-btn" onclick="copyResults()">📋 Kopyala</button>
+</div>
+
+<script>
+const IDS   = [2,5,8,11,14,17];
+const NAMES = ['Femur 1','Femur 2','Femur 3','Femur 4','Femur 5','Femur 6'];
+const MAX   = 4095;
+
+let targets = {};
+let targetInit = {};  // target gerçek pozisyonla henüz senkronize edildi mi?
+IDS.forEach(id => { targets[id] = 2048; targetInit[id] = false; });
+
+// Build cards
+const grid = document.getElementById('grid');
+IDS.forEach((mid,i) => {
+  grid.innerHTML += `
+  <div class="card" id="card-${mid}">
+    <div class="card-top">
+      <div><div class="motor-name">${NAMES[i]}</div><div class="motor-id">ID ${mid}</div></div>
+      <label class="sw">
+        <span class="sw-label">Tork</span>
+        <input type="checkbox" id="trq-${mid}" onchange="setTorque(${mid},this.checked)">
+        <div class="sw-track"></div>
+      </label>
+    </div>
+    <div class="pos-num" id="pn-${mid}">—</div>
+    <div class="pos-deg" id="pd-${mid}">hedef: 2048</div>
+    <div class="track-wrap">
+      <div class="track" id="trk-${mid}">
+        <div class="track-fill" id="fill-${mid}" style="width:50%"></div>
+        <div class="track-cursor" id="cur-${mid}" style="left:50%"></div>
+        <div class="marker min-m" id="mn-${mid}" style="display:none" data-v=""></div>
+        <div class="marker max-m" id="mx-${mid}" style="display:none" data-v=""></div>
+      </div>
+      <div class="track-ends"><span>0</span><span>1024</span><span>2048</span><span>3072</span><span>4095</span></div>
+    </div>
+    <div class="steps">
+      <button class="step neg" onclick="step(${mid},-200)">-200</button>
+      <button class="step neg" onclick="step(${mid},-50)">-50</button>
+      <button class="step neg" onclick="step(${mid},-10)">-10</button>
+      <button class="step neg" onclick="step(${mid},-1)">-1</button>
+      <div class="mid-sep"></div>
+      <button class="step pos" onclick="step(${mid},+1)">+1</button>
+      <button class="step pos" onclick="step(${mid},+10)">+10</button>
+      <button class="step pos" onclick="step(${mid},+50)">+50</button>
+      <button class="step pos" onclick="step(${mid},+200)">+200</button>
+    </div>
+    <div class="actions">
+      <button class="act min-btn" onclick="setLimit(${mid},'min')">◀ MIN</button>
+      <button class="act" onclick="centerMotor(${mid})">Merkez</button>
+      <button class="act max-btn" onclick="setLimit(${mid},'max')">MAX ▶</button>
+    </div>
+    <div class="limit-bar">
+      <span class="lmin" id="li-min-${mid}">MIN: —</span>
+      <span class="lrng" id="li-rng-${mid}">—</span>
+      <span class="lmax" id="li-max-${mid}">MAX: —</span>
+    </div>
+  </div>`;
+});
+
+// Build summary rows
+const tbody = document.getElementById('tbody');
+IDS.forEach((mid,i) => {
+  tbody.innerHTML += `<tr>
+    <td>${NAMES[i]}</td><td class="c-id">${mid}</td>
+    <td id="s-pos-${mid}" class="c-n">—</td>
+    <td id="s-min-${mid}" class="c-min">—</td>
+    <td id="s-max-${mid}" class="c-max">—</td>
+    <td id="s-rng-${mid}" class="c-n">—</td>
+    <td id="s-deg-${mid}" class="c-n">—</td>
+  </tr>`;
+});
+
+// ── Socket ────────────────────────────────────────────────────────────────
+const socket = io();
+let st = {};
+
+socket.on('connect', () => {
+  document.getElementById('dot').classList.add('on');
+  document.getElementById('statusTxt').textContent = 'Bağlı · /dev/ttyUSB0';
+});
+socket.on('disconnect', () => {
+  document.getElementById('dot').classList.remove('on');
+  document.getElementById('statusTxt').textContent = 'Bağlantı kesildi';
+});
+
+socket.on('update', data => {
+  st = data;
+  IDS.forEach(mid => {
+    if(data[mid]) {
+      // İlk geçerli pozisyonda target'ı senkronize et
+      if (!targetInit[mid] && data[mid].pos >= 0) {
+        targets[mid] = data[mid].pos;
+        targetInit[mid] = true;
+      }
+      updateCard(mid, data[mid]);
+    }
+  });
+  updateSummary();
+});
+
+function updateCard(mid, d) {
+  const pos = d.pos;
+  const pct = pos >= 0 ? (pos/MAX*100).toFixed(2) : 50;
+
+  // Numbers
+  document.getElementById(`pn-${mid}`).textContent = pos >= 0 ? pos : '—';
+  document.getElementById(`pd-${mid}`).textContent =
+    pos >= 0 ? `${(pos*360/4096).toFixed(1)}° · hedef: ${targets[mid]}` : `hedef: ${targets[mid]}`;
+
+  // Track
+  document.getElementById(`fill-${mid}`).style.width  = pct + '%';
+  document.getElementById(`cur-${mid}`).style.left     = pct + '%';
+
+  // Min/Max markers
+  const mn = document.getElementById(`mn-${mid}`);
+  const mx = document.getElementById(`mx-${mid}`);
+  if (d.min != null) { mn.style.display='block'; mn.style.left=(d.min/MAX*100).toFixed(2)+'%'; mn.setAttribute('data-v', d.min); }
+  else mn.style.display='none';
+  if (d.max != null) { mx.style.display='block'; mx.style.left=(d.max/MAX*100).toFixed(2)+'%'; mx.setAttribute('data-v', d.max); }
+  else mx.style.display='none';
+
+  // Torque
+  document.getElementById(`trq-${mid}`).checked = !!d.torque;
+  document.getElementById(`card-${mid}`).classList.toggle('torque-on', !!d.torque);
+
+  // Limit bar
+  document.getElementById(`li-min-${mid}`).textContent = d.min != null ? `MIN: ${d.min}` : 'MIN: —';
+  document.getElementById(`li-max-${mid}`).textContent = d.max != null ? `MAX: ${d.max}` : 'MAX: —';
+  if (d.min != null && d.max != null) {
+    const r = d.max - d.min;
+    document.getElementById(`li-rng-${mid}`).textContent = `${r} · ${(r*360/4096).toFixed(1)}°`;
+  } else {
+    document.getElementById(`li-rng-${mid}`).textContent = '—';
+  }
+}
+
+function updateSummary() {
+  IDS.forEach(mid => {
+    const d = st[mid]; if(!d) return;
+    document.getElementById(`s-pos-${mid}`).textContent = d.pos >= 0 ? d.pos : '—';
+    document.getElementById(`s-min-${mid}`).textContent = d.min != null ? d.min : '—';
+    document.getElementById(`s-max-${mid}`).textContent = d.max != null ? d.max : '—';
+    if (d.min != null && d.max != null) {
+      const r = d.max - d.min;
+      document.getElementById(`s-rng-${mid}`).textContent = r;
+      document.getElementById(`s-deg-${mid}`).textContent = (r*360/4096).toFixed(1)+'°';
+    } else {
+      document.getElementById(`s-rng-${mid}`).textContent = '—';
+      document.getElementById(`s-deg-${mid}`).textContent = '—';
+    }
+  });
+}
+
+// ── Controls ─────────────────────────────────────────────────────────────
+function step(mid, delta) {
+  targets[mid] = Math.max(0, Math.min(MAX, targets[mid] + delta));
+  socket.emit('move', {id: mid, pos: targets[mid]});
+}
+function centerMotor(mid) { targets[mid] = 2048; socket.emit('move', {id:mid, pos:2048}); }
+function allCenter()     { IDS.forEach(id => centerMotor(id)); }
+function setTorque(mid, on) { socket.emit('torque', {id:mid, on}); }
+function allTorqueOn()   { IDS.forEach(id => { document.getElementById(`trq-${id}`).checked=true;  socket.emit('torque',{id,on:true}); }); }
+function allTorqueOff()  { IDS.forEach(id => { document.getElementById(`trq-${id}`).checked=false; socket.emit('torque',{id,on:false}); }); }
+function setLimit(mid, type) { socket.emit('set_limit', {id:mid, type}); }
+function clearAllLimits() { IDS.forEach(id => socket.emit('clear_limits', {id})); }
+function unlockEepromAll() {
+  if (!confirm('Tüm motorların EEPROM açı limiti 0–4095 yapılacak. Emin misin?')) return;
+  socket.emit('unlim_all');
+}
+
+function copyResults() {
+  let txt = 'Motor\tID\tMIN\tMAX\tAralık\tDerece\n';
+  IDS.forEach((mid,i) => {
+    const d = st[mid]||{};
+    const r = (d.min!=null&&d.max!=null) ? d.max-d.min : null;
+    txt += `${NAMES[i]}\t${mid}\t${d.min??'N/A'}\t${d.max??'N/A'}\t${r??'N/A'}\t${r?((r*360/4096).toFixed(1)+'°'):'N/A'}\n`;
+  });
+  navigator.clipboard.writeText(txt);
+  const b = event.target;
+  b.textContent='✓ Kopyalandı!'; setTimeout(()=>b.textContent='📋 Kopyala',2000);
+}
+</script>
+</body>
+</html>

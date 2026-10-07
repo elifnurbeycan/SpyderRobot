@@ -1,0 +1,313 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8">
+<title>18 Motor Kontrol — Hexapod</title>
+<script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=JetBrains+Mono&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#080b10;--card:rgba(255,255,255,.04);--border:rgba(255,255,255,.09);
+  --accent:#00d4ff;--st:#00d4ff;--ax:#ffb020;
+  --red:#ff4560;--green:#00e676;--text:#e2e8f0;--muted:#64748b;
+}
+body{background:var(--bg);color:var(--text);font-family:'Space Grotesk',sans-serif;padding:24px;min-height:100vh}
+header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+h1{font-size:20px;font-weight:700}h1 span{color:var(--accent)}
+.sub{font-size:12px;color:var(--muted);margin-top:2px}
+.badge{display:flex;align-items:center;gap:8px;padding:7px 14px;border:1px solid var(--border);border-radius:20px;font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted);transition:.3s}
+.dot.on{background:var(--green);box-shadow:0 0 8px var(--green);animation:blink 2s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.5}}
+.top-bar{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.tb-btn{padding:7px 16px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--muted);font-family:inherit;font-size:13px;cursor:pointer;transition:.2s}
+.tb-btn:hover{border-color:var(--accent);color:var(--accent)}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:28px}
+@media(max-width:1100px){.grid{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:640px){.grid{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:16px;transition:border-color .3s}
+.card.torque-on{border-color:rgba(0,212,255,.25)}
+.card.tip-A{border-left:3px solid var(--ax)}
+.card.tip-S{border-left:3px solid var(--st)}
+.card-top{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.motor-name{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.5px}
+.motor-id{font-size:17px;font-weight:700}
+.tip-tag{font-size:9px;padding:2px 6px;border-radius:4px;margin-left:6px;vertical-align:middle}
+.tip-tag.S{background:rgba(0,212,255,.15);color:var(--st)}
+.tip-tag.A{background:rgba(255,176,32,.15);color:var(--ax)}
+.sw{display:flex;align-items:center;gap:6px}
+.sw-label{font-size:11px;color:var(--muted)}
+.sw input{display:none}
+.sw-track{width:34px;height:18px;background:rgba(255,255,255,.1);border-radius:9px;cursor:pointer;position:relative;transition:.3s}
+.sw-track::after{content:'';position:absolute;left:2px;top:2px;width:14px;height:14px;border-radius:50%;background:var(--muted);transition:.3s}
+input:checked~.sw-track{background:rgba(0,212,255,.25)}
+input:checked~.sw-track::after{transform:translateX(16px);background:var(--accent);box-shadow:0 0 6px var(--accent)}
+.pos-num{font-family:'JetBrains Mono',monospace;font-size:36px;font-weight:500;color:var(--accent);text-align:center;line-height:1}
+.pos-deg{font-size:12px;color:var(--muted);text-align:center;margin-top:4px;margin-bottom:12px;font-family:'JetBrains Mono',monospace}
+.track-wrap{position:relative;margin-bottom:18px}
+.track{position:relative;height:7px;background:rgba(255,255,255,.07);border-radius:4px;margin:6px 0 18px}
+.track-fill{height:100%;background:linear-gradient(90deg,rgba(0,212,255,.25),var(--accent));border-radius:4px;transition:width .2s}
+.track-cursor{position:absolute;top:50%;width:13px;height:13px;background:var(--accent);border-radius:50%;transform:translate(-50%,-50%);box-shadow:0 0 10px var(--accent);transition:left .2s;pointer-events:none}
+.marker{position:absolute;top:-4px;width:2px;height:15px;border-radius:1px;transform:translateX(-50%)}
+.marker.min-m{background:var(--red)}.marker.max-m{background:var(--green)}
+.marker::after{position:absolute;top:17px;left:50%;transform:translateX(-50%);font-size:9px;font-family:'JetBrains Mono',monospace;white-space:nowrap}
+.marker.min-m::after{content:attr(data-v);color:var(--red)}
+.marker.max-m::after{content:attr(data-v);color:var(--green)}
+.track-ends{display:flex;justify-content:space-between;font-size:9px;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.steps{display:flex;gap:5px;margin-bottom:10px}
+.step{flex:1;padding:7px 3px;border:1px solid var(--border);border-radius:7px;background:transparent;color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px;cursor:pointer;text-align:center;transition:.15s;user-select:none}
+.step:hover{background:rgba(255,255,255,.06);color:var(--text)}
+.step:active{transform:scale(.94)}
+.step.neg:hover{border-color:rgba(255,69,96,.35);color:#ff7080}
+.step.pos:hover{border-color:rgba(0,212,255,.35);color:var(--accent)}
+.mid-sep{width:1px;background:var(--border);margin:0 2px}
+.actions{display:grid;grid-template-columns:1fr 1fr 1fr;gap:7px}
+.act{padding:7px;border-radius:7px;border:1px solid var(--border);background:transparent;color:var(--muted);font-family:inherit;font-size:11px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;cursor:pointer;transition:.2s}
+.act:hover{background:rgba(255,255,255,.05);color:var(--text)}
+.act.min-btn{border-color:rgba(255,69,96,.3);color:#ff6070}
+.act.min-btn:hover{background:rgba(255,69,96,.1);border-color:var(--red);color:var(--red)}
+.act.max-btn{border-color:rgba(0,230,118,.3);color:#00cc66}
+.act.max-btn:hover{background:rgba(0,230,118,.1);border-color:var(--green);color:var(--green)}
+.limit-bar{display:flex;justify-content:space-between;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:11px}
+.lmin{color:var(--red)}.lrng{color:var(--muted)}.lmax{color:var(--green)}
+.summary{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:22px}
+.sec-title{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:14px}
+table{width:100%;border-collapse:collapse}
+th{padding:7px 10px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px;border-bottom:1px solid var(--border);text-align:left}
+td{padding:8px 10px;font-size:13px;border-bottom:1px solid rgba(255,255,255,.03);font-family:'JetBrains Mono',monospace}
+tr:last-child td{border-bottom:none}
+.c-id{color:var(--accent);font-weight:600}.c-min{color:var(--red)}.c-max{color:var(--green)}.c-n{color:var(--muted)}
+.copy-btn{margin-top:14px;padding:8px 18px;border:1px solid var(--border);border-radius:8px;background:transparent;color:var(--muted);font-family:inherit;font-size:12px;cursor:pointer;transition:.2s}
+.copy-btn:hover{border-color:var(--accent);color:var(--accent)}
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>18 Motor <span>Kontrol</span></h1>
+    <div class="sub">Hexapod · 6 ST3020 (femur) + 12 AX-12A (coxa/tibia) · min/max elle işaretle</div>
+  </div>
+  <div class="badge"><div class="dot" id="dot"></div><span id="statusTxt">Bağlanıyor…</span></div>
+</header>
+
+<div class="top-bar">
+  <button class="tb-btn" onclick="allTorqueOff()">○ Tork Hepsine Kapat (elle çevir)</button>
+  <button class="tb-btn" onclick="allTorqueOn()">⚡ Tork Hepsine Aç</button>
+  <button class="tb-btn" onclick="clearAllLimits()">✕ İşaretleri Sıfırla</button>
+  <button class="tb-btn" style="border-color:rgba(255,165,0,.4);color:#ffa500" onclick="unlockEepromAll()">🔓 Açı Limitlerini Kaldır</button>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div class="summary">
+  <div class="sec-title">Kalibrasyon Özeti (ham adım · derece)</div>
+  <table>
+    <thead><tr><th>Motor</th><th>ID</th><th>Tip</th><th>Mevcut</th><th>MIN</th><th>MAX</th><th>Merkez</th><th>Aralık°</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+  <button class="copy-btn" onclick="copyResults()">📋 Kopyala (TSV)</button>
+</div>
+
+<script>
+// id -> {name, tip, posmax, degspan}  (sunucudan da gelir ama ilk render için sabit)
+const MOTORS = [
+  [1,'B1 Tibia','A'],[2,'B1 Femur','S'],[3,'B1 Coxa','A'],
+  [4,'B2 Tibia','A'],[5,'B2 Femur','S'],[6,'B2 Coxa','A'],
+  [7,'B3 Tibia','A'],[8,'B3 Femur','S'],[9,'B3 Coxa','A'],
+  [10,'B4 Coxa','A'],[11,'B4 Femur','S'],[12,'B4 Tibia','A'],
+  [13,'B5 Coxa','A'],[14,'B5 Femur','S'],[15,'B5 Tibia','A'],
+  [16,'B6 Coxa','A'],[17,'B6 Femur','S'],[18,'B6 Tibia','A'],
+];
+const POSMAX  = {'S':4095,'A':1023};
+const DEGSPAN = {'S':360.0,'A':300.0};
+const IDS = MOTORS.map(m=>m[0]);
+const META = {}; MOTORS.forEach(m=>META[m[0]]={name:m[1],tip:m[2],posmax:POSMAX[m[2]],degspan:DEGSPAN[m[2]]});
+
+function deg(mid,pos){ return (pos*META[mid].degspan/(META[mid].posmax+1)).toFixed(1); }
+
+// Kural: her eklem ~180 derece oynatildi. Ham fark 100 dereceden AZ cikiyorsa
+// motor sarma noktasindan (N-1 -> 0) gecmis demektir -> max += N.
+// (min > max durumu da otomatik bu esige takilir cunku span negatif olur.)
+// span = max-min, merkez = ((min+max)/2) mod N.
+const WRAP_ESIK_DEG = 100;   // bu dereceden kucuk ham aralik = sarma
+function spanCtr(mid, mn, mx){
+  const N = META[mid].posmax + 1;                 // ST3020: 4096, AX: 1024
+  const derecePerAdim = META[mid].degspan / N;    // ST: ~0.088, AX: ~0.293
+  let mx2 = mx, wrap = false;
+  if ((mx - mn) * derecePerAdim < WRAP_ESIK_DEG) {
+    mx2 = mx + N;                                 // sarma duzeltmesi
+    wrap = true;
+  }
+  const span = mx2 - mn;
+  const ctr  = Math.round((mn + mx2) / 2) % N;
+  return {span, ctr, wrap};
+}
+
+let targets = {}, targetInit = {};
+IDS.forEach(id => { targets[id] = Math.round(META[id].posmax/2); targetInit[id]=false; });
+
+const grid = document.getElementById('grid');
+MOTORS.forEach(([mid,name,tip]) => {
+  const pmax = POSMAX[tip];
+  grid.innerHTML += `
+  <div class="card tip-${tip}" id="card-${mid}">
+    <div class="card-top">
+      <div>
+        <div class="motor-name">${name}</div>
+        <div class="motor-id">ID ${mid}<span class="tip-tag ${tip}">${tip==='S'?'ST3020':'AX-12A'}</span></div>
+      </div>
+      <label class="sw">
+        <span class="sw-label">Tork</span>
+        <input type="checkbox" id="trq-${mid}" onchange="setTorque(${mid},this.checked)">
+        <div class="sw-track"></div>
+      </label>
+    </div>
+    <div class="pos-num" id="pn-${mid}">—</div>
+    <div class="pos-deg" id="pd-${mid}">hedef: —</div>
+    <div class="track-wrap">
+      <div class="track" id="trk-${mid}">
+        <div class="track-fill" id="fill-${mid}" style="width:50%"></div>
+        <div class="track-cursor" id="cur-${mid}" style="left:50%"></div>
+        <div class="marker min-m" id="mn-${mid}" style="display:none" data-v=""></div>
+        <div class="marker max-m" id="mx-${mid}" style="display:none" data-v=""></div>
+      </div>
+      <div class="track-ends"><span>0</span><span>${Math.round(pmax/2)}</span><span>${pmax}</span></div>
+    </div>
+    <div class="steps">
+      <button class="step neg" onclick="step(${mid},-100)">-100</button>
+      <button class="step neg" onclick="step(${mid},-20)">-20</button>
+      <button class="step neg" onclick="step(${mid},-5)">-5</button>
+      <button class="step neg" onclick="step(${mid},-1)">-1</button>
+      <div class="mid-sep"></div>
+      <button class="step pos" onclick="step(${mid},+1)">+1</button>
+      <button class="step pos" onclick="step(${mid},+5)">+5</button>
+      <button class="step pos" onclick="step(${mid},+20)">+20</button>
+      <button class="step pos" onclick="step(${mid},+100)">+100</button>
+    </div>
+    <div class="actions">
+      <button class="act min-btn" onclick="setLimit(${mid},'min')">◀ MIN İşaretle</button>
+      <button class="act" onclick="centerMotor(${mid})">Orta</button>
+      <button class="act max-btn" onclick="setLimit(${mid},'max')">MAX İşaretle ▶</button>
+    </div>
+    <div class="limit-bar">
+      <span class="lmin" id="li-min-${mid}">MIN: —</span>
+      <span class="lrng" id="li-rng-${mid}">—</span>
+      <span class="lmax" id="li-max-${mid}">MAX: —</span>
+    </div>
+  </div>`;
+});
+
+const tbody = document.getElementById('tbody');
+MOTORS.forEach(([mid,name,tip]) => {
+  tbody.innerHTML += `<tr>
+    <td>${name}</td><td class="c-id">${mid}</td><td class="c-n">${tip==='S'?'ST3020':'AX-12A'}</td>
+    <td id="s-pos-${mid}" class="c-n">—</td>
+    <td id="s-min-${mid}" class="c-min">—</td>
+    <td id="s-max-${mid}" class="c-max">—</td>
+    <td id="s-ctr-${mid}" class="c-n">—</td>
+    <td id="s-deg-${mid}" class="c-n">—</td>
+  </tr>`;
+});
+
+const socket = io();
+let st = {};
+
+socket.on('connect', () => {
+  document.getElementById('dot').classList.add('on');
+  document.getElementById('statusTxt').textContent = 'Bağlı · /dev/ttyUSB0';
+});
+socket.on('disconnect', () => {
+  document.getElementById('dot').classList.remove('on');
+  document.getElementById('statusTxt').textContent = 'Bağlantı kesildi';
+});
+socket.on('toast', d => alert(d.msg));
+
+socket.on('update', data => {
+  st = data;
+  IDS.forEach(mid => {
+    if(data[mid]) {
+      if (!targetInit[mid] && data[mid].pos >= 0) {
+        targets[mid] = data[mid].pos; targetInit[mid] = true;
+      }
+      updateCard(mid, data[mid]);
+    }
+  });
+  updateSummary();
+});
+
+function updateCard(mid, d) {
+  const pos = d.pos, pmax = META[mid].posmax;
+  const pct = pos >= 0 ? (pos/pmax*100).toFixed(2) : 50;
+  document.getElementById(`pn-${mid}`).textContent = pos >= 0 ? pos : '—';
+  document.getElementById(`pd-${mid}`).textContent =
+    pos >= 0 ? `${deg(mid,pos)}° · hedef ${targets[mid]}` : `hedef ${targets[mid]}`;
+  document.getElementById(`fill-${mid}`).style.width = pct + '%';
+  document.getElementById(`cur-${mid}`).style.left   = pct + '%';
+  const mn = document.getElementById(`mn-${mid}`), mx = document.getElementById(`mx-${mid}`);
+  if (d.min != null) { mn.style.display='block'; mn.style.left=(d.min/pmax*100).toFixed(2)+'%'; mn.setAttribute('data-v', d.min); }
+  else mn.style.display='none';
+  if (d.max != null) { mx.style.display='block'; mx.style.left=(d.max/pmax*100).toFixed(2)+'%'; mx.setAttribute('data-v', d.max); }
+  else mx.style.display='none';
+  document.getElementById(`trq-${mid}`).checked = !!d.torque;
+  document.getElementById(`card-${mid}`).classList.toggle('torque-on', !!d.torque);
+  document.getElementById(`li-min-${mid}`).textContent = d.min != null ? `MIN ${d.min} · ${deg(mid,d.min)}°` : 'MIN: —';
+  document.getElementById(`li-max-${mid}`).textContent = d.max != null ? `MAX ${d.max} · ${deg(mid,d.max)}°` : 'MAX: —';
+  if (d.min != null && d.max != null) {
+    const sc = spanCtr(mid, d.min, d.max);
+    const rdeg = (sc.span*META[mid].degspan/(pmax+1)).toFixed(1);
+    document.getElementById(`li-rng-${mid}`).textContent = sc.wrap ? `${rdeg}° ↻` : `${rdeg}°`;
+  } else document.getElementById(`li-rng-${mid}`).textContent = '—';
+}
+
+function updateSummary() {
+  IDS.forEach(mid => {
+    const d = st[mid]; if(!d) return;
+    document.getElementById(`s-pos-${mid}`).textContent = d.pos >= 0 ? d.pos : '—';
+    document.getElementById(`s-min-${mid}`).textContent = d.min != null ? d.min : '—';
+    document.getElementById(`s-max-${mid}`).textContent = d.max != null ? d.max : '—';
+    if (d.min != null && d.max != null) {
+      const sc = spanCtr(mid, d.min, d.max);
+      document.getElementById(`s-ctr-${mid}`).textContent = sc.wrap ? `${sc.ctr} ↻` : sc.ctr;
+      document.getElementById(`s-deg-${mid}`).textContent = (sc.span*META[mid].degspan/(META[mid].posmax+1)).toFixed(1)+'°';
+    } else {
+      document.getElementById(`s-ctr-${mid}`).textContent = '—';
+      document.getElementById(`s-deg-${mid}`).textContent = '—';
+    }
+  });
+}
+
+function step(mid, delta) {
+  targets[mid] = Math.max(0, Math.min(META[mid].posmax, targets[mid] + delta));
+  socket.emit('move', {id: mid, pos: targets[mid]});
+}
+function centerMotor(mid) { const c=Math.round(META[mid].posmax/2); targets[mid]=c; socket.emit('move',{id:mid,pos:c}); }
+function setTorque(mid, on) { socket.emit('torque', {id:mid, on}); }
+function allTorqueOn()  { IDS.forEach(id => { document.getElementById(`trq-${id}`).checked=true;  socket.emit('torque',{id,on:true}); }); }
+function allTorqueOff() { IDS.forEach(id => { document.getElementById(`trq-${id}`).checked=false; socket.emit('torque',{id,on:false}); }); }
+function setLimit(mid, type) { socket.emit('set_limit', {id:mid, type}); }
+function clearAllLimits() { IDS.forEach(id => socket.emit('clear_limits', {id})); }
+function unlockEepromAll() {
+  if (!confirm('18 motorun açı limiti tam aralığa açılacak. Emin misin?')) return;
+  socket.emit('unlim_all');
+}
+
+function copyResults() {
+  let txt = 'Motor\tID\tTip\tMIN\tMAX\tMerkez\tAralık°\tSarma\n';
+  MOTORS.forEach(([mid,name,tip]) => {
+    const d = st[mid]||{};
+    const has = d.min!=null && d.max!=null;
+    const sc = has ? spanCtr(mid, d.min, d.max) : null;
+    const ctr = has ? sc.ctr : 'N/A';
+    const r = has ? (sc.span*META[mid].degspan/(META[mid].posmax+1)).toFixed(1)+'°' : 'N/A';
+    const wrapFlag = has && sc.wrap ? 'EVET' : (has ? 'hayır' : 'N/A');
+    txt += `${name}\t${mid}\t${tip==='S'?'ST3020':'AX-12A'}\t${d.min??'N/A'}\t${d.max??'N/A'}\t${ctr}\t${r}\t${wrapFlag}\n`;
+  });
+  navigator.clipboard.writeText(txt);
+  const b = event.target;
+  b.textContent='✓ Kopyalandı!'; setTimeout(()=>b.textContent='📋 Kopyala (TSV)',2000);
+}
+</script>
+</body>
+</html>
